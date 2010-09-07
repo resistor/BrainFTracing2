@@ -51,6 +51,9 @@ size_t op_back(size_t, uint8_t**);
 // op_set_zero - Implements the '0' synthetic instruction.
 size_t op_set_zero(size_t, uint8_t**);
 
+// op_bin_add - Implements the '0' synthetic instruction.
+size_t op_bin_add(size_t, uint8_t**);
+
 // op_end - Terminates an execution.
 size_t op_end(size_t, uint8_t**);
 

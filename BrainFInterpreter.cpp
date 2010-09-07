@@ -97,10 +97,22 @@ int main(int argc, char **argv) {
       case ']':
         // Special case: [-] --> 0
         if (BytecodeOffset > 1 && 
-            CodeBegin[i-1] == '-' && CodeBegin[i-2] == '[') {
+            CodeBegin[i-2] == '[' && CodeBegin[i-1] == '-') {
           Stack.pop_back();
           BytecodeOffset -= 2;
           BytecodeArray[BytecodeOffset++] = &op_set_zero;
+        // Special case: [->+<] --> a
+        } else if (BytecodeOffset > 4 &&
+                 CodeBegin[i-5] == '[' && CodeBegin[i-4] == '-' &&
+                 CodeBegin[i-3] == '>' && CodeBegin[i-2] == '+' &&
+                 CodeBegin[i-1] == '<' &&
+                 JumpMap[BytecodeOffset-1] == JumpMap[BytecodeOffset-3]) {
+          BytecodeOffset -= 5;
+          JumpMap[BytecodeOffset] = JumpMap[BytecodeOffset+2];
+          for (unsigned j = 1; j < 6; ++j)
+            JumpMap[BytecodeOffset+j] = 0;
+          Stack.pop_back();
+          BytecodeArray[BytecodeOffset++] = &op_bin_add;
         } else {
           JumpMap[Stack.back()] = BytecodeOffset;
           JumpMap[BytecodeOffset] = Stack.back();

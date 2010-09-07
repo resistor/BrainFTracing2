@@ -61,6 +61,13 @@ size_t op_set_zero(size_t pc, uint8_t **data) {
   return pc+1;
 }
 
+size_t op_bin_add(size_t pc, uint8_t **data) {
+  uint8_t *ptr = *data;
+  *(ptr + JumpMap[pc]) += *ptr;
+  *ptr = 0;
+  return pc+1;
+}
+
 size_t op_end(size_t, uint8_t **) {
   return ~0ULL;
 }
