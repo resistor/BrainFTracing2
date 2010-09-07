@@ -51,7 +51,8 @@ size_t op_if(size_t pc, uint8_t **data) {
 }
 
 size_t op_back(size_t pc, uint8_t **data) {
-  size_t new_pc = JumpMap[pc];
+  size_t new_pc = pc+1;
+  if (**data) new_pc = JumpMap[pc]+1;
   return new_pc;
 }
 
