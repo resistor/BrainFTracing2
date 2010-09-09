@@ -1,15 +1,15 @@
-##===- examples/BrainF/Makefile ----------------------------*- Makefile -*-===##
-# 
-#                     The LLVM Compiler Infrastructure
-#
-# This file is distributed under the University of Illinois Open Source
-# License. See LICENSE.TXT for details.
-# 
-##===----------------------------------------------------------------------===##
-LEVEL = ../..
-TOOLNAME = BrainFTracing2
-EXAMPLE_TOOL = 1
+CXX = g++
+CXXFLAGS = $(shell llvm-config --cxxflags)
+LDFLAGS = $(shell llvm-config --ldflags)
+LIBS = $(shell llvm-config --libs jit bitwriter nativecodegen)
 
-LINK_COMPONENTS := scalaropts ipo jit bitwriter nativecodegen interpreter
+OBJS = BrainFInterpreter.o
 
-include $(LEVEL)/Makefile.common
+BrainFTracing2: $(OBJS)
+	$(CXX) $(OBJS) $(LDFLAGS) $(LIBS) -o $@
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -O3 -c -o $@ $<
+
+clean:
+	rm -rf *.o BrainFTracing2
