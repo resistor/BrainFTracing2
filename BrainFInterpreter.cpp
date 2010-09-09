@@ -19,6 +19,9 @@ using namespace llvm;
 static cl::opt<std::string>
 InputFilename(cl::Positional, cl::desc("<input brainf>"));
 
+void **BytecodeArray = 0;
+size_t *JumpMap = 0;
+
 int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(argc, argv, " BrainF compiler\n");
 
@@ -34,9 +37,9 @@ int main(int argc, char **argv) {
   
   // Create a new buffer to hold the preprocessed code.
   MemoryBuffer *ParsedCode =
-    MemoryBuffer::getNewMemBuffer(sizeof(opcode_func_t) * 
+    MemoryBuffer::getNewMemBuffer(sizeof(void*) * 
                                   (Code->getBufferSize()+1));
-  BytecodeArray = (opcode_func_t*)(ParsedCode->getBufferStart());
+  BytecodeArray = (void**)(ParsedCode->getBufferStart());
   size_t BytecodeOffset = 0;
   
   // Create JumpMap, a special on-the-side data array used to implement
@@ -53,46 +56,46 @@ int main(int argc, char **argv) {
     uint8_t opcode = CodeBegin[i];
     switch (opcode) {
       case '>':
-        if (BytecodeArray[BytecodeOffset-1] == &op_right)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_right)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &op_right;
+          BytecodeArray[BytecodeOffset++] = &&op_right;
         }
         break;
       case '<':
-        if (BytecodeArray[BytecodeOffset-1] == &op_left)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_left)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &op_left;
+          BytecodeArray[BytecodeOffset++] = &&op_left;
         }
         break;
       case '+':
-        if (BytecodeArray[BytecodeOffset-1] == &op_plus)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_plus)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &op_plus;
+          BytecodeArray[BytecodeOffset++] = &&op_plus;
         }
         break;
       case '-':
-        if (BytecodeArray[BytecodeOffset-1] == &op_minus)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_minus)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &op_minus;
+          BytecodeArray[BytecodeOffset++] = &&op_minus;
         }
         break;
       case '.':
-        BytecodeArray[BytecodeOffset++] = &op_put;
+        BytecodeArray[BytecodeOffset++] = &&op_put;
         break;
       case ',':
-        BytecodeArray[BytecodeOffset++] = &op_get;
+        BytecodeArray[BytecodeOffset++] = &&op_get;
         break;
       case '[':
         Stack.push_back(BytecodeOffset);
-        BytecodeArray[BytecodeOffset++] = &op_if;
+        BytecodeArray[BytecodeOffset++] = &&op_if;
         break;
       case ']':
         // Special case: [-] --> 0
@@ -100,7 +103,7 @@ int main(int argc, char **argv) {
             CodeBegin[i-2] == '[' && CodeBegin[i-1] == '-') {
           Stack.pop_back();
           BytecodeOffset -= 2;
-          BytecodeArray[BytecodeOffset++] = &op_set_zero;
+          BytecodeArray[BytecodeOffset++] = &&op_set_zero;
         // Special case: [->+<] --> a
         } else if (BytecodeOffset > 4 &&
                  CodeBegin[i-5] == '[' && CodeBegin[i-4] == '-' &&
@@ -112,12 +115,12 @@ int main(int argc, char **argv) {
           for (unsigned j = 1; j < 6; ++j)
             JumpMap[BytecodeOffset+j] = 0;
           Stack.pop_back();
-          BytecodeArray[BytecodeOffset++] = &op_bin_add;
+          BytecodeArray[BytecodeOffset++] = &&op_bin_add;
         } else {
           JumpMap[Stack.back()] = BytecodeOffset;
           JumpMap[BytecodeOffset] = Stack.back();
           Stack.pop_back();
-          BytecodeArray[BytecodeOffset++] = &op_back;
+          BytecodeArray[BytecodeOffset++] = &&op_back;
         }
         break;
       default:
@@ -128,7 +131,7 @@ int main(int argc, char **argv) {
   // Fill in the suffix of the preprocessed source for op_exit.
   // Thus, if we reach the end of the source, the program will terminate.
   while (BytecodeOffset < Code->getBufferSize()+1) {
-    BytecodeArray[BytecodeOffset++] = &op_end;
+    BytecodeArray[BytecodeOffset++] = &&op_end;
   }
   
   // Setup the array.
@@ -141,10 +144,9 @@ int main(int argc, char **argv) {
   uint8_t* data = BrainFArray;
   
   size_t pc = 0;
-  while (pc != ~0ULL) {
-    pc = BytecodeArray[pc](pc, &data);
-  }
+  goto *BytecodeArray[pc];
   
+op_end:
   //Clean up
   delete Code;
   delete ParsedCode;
@@ -152,4 +154,55 @@ int main(int argc, char **argv) {
   delete[] JumpMap;
 
   return 0;
+
+op_plus:
+  *data += JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_minus:
+  *data -= JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_left:
+  data -= JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_right:
+  data += JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_put:
+  putchar(*data);
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_get:
+  *data = getchar();
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_if:
+  if (!*data) pc = JumpMap[pc]+1;
+  else pc += 1;
+  goto *BytecodeArray[pc];
+
+op_back:
+  if (*data) pc = JumpMap[pc]+1;
+  else pc += 1;
+  goto *BytecodeArray[pc];
+
+op_set_zero:
+  *data = 0;
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_bin_add:
+  *(data + JumpMap[pc]) += *data;
+  *data = 0;
+  pc += 1;
+  goto *BytecodeArray[pc];
 }
