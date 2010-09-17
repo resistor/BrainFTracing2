@@ -8,6 +8,7 @@
 //===--------------------------------------------------------------------===//
 
 #include "BrainFVM.h"
+#include "BrainFTraceRecorder.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -20,6 +21,7 @@ static cl::opt<std::string>
 InputFilename(cl::Positional, cl::desc("<input brainf>"));
 
 void **BytecodeArray = 0;
+void **AltBytecodeArray = 0;
 size_t *JumpMap = 0;
 
 int main(int argc, char **argv) {
@@ -39,7 +41,11 @@ int main(int argc, char **argv) {
   MemoryBuffer *ParsedCode =
     MemoryBuffer::getNewMemBuffer(sizeof(void*) * 
                                   (Code->getBufferSize()+1));
+  MemoryBuffer *AltParsedCode =
+    MemoryBuffer::getNewMemBuffer(sizeof(void*) * 
+                                  (Code->getBufferSize()+1));
   BytecodeArray = (void**)(ParsedCode->getBufferStart());
+  AltBytecodeArray = (void**)(AltParsedCode->getBufferStart());
   size_t BytecodeOffset = 0;
   
   // Create JumpMap, a special on-the-side data array used to implement
@@ -56,46 +62,53 @@ int main(int argc, char **argv) {
     uint8_t opcode = CodeBegin[i];
     switch (opcode) {
       case '>':
-        if (BytecodeArray[BytecodeOffset-1] == &&op_right)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_right_prof)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &&op_right;
+          BytecodeArray[BytecodeOffset] = &&op_right_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_right_rec;
         }
         break;
       case '<':
-        if (BytecodeArray[BytecodeOffset-1] == &&op_left)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_left_prof)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &&op_left;
+          BytecodeArray[BytecodeOffset] = &&op_left_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_left_rec;
         }
         break;
       case '+':
-        if (BytecodeArray[BytecodeOffset-1] == &&op_plus)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_plus_prof)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &&op_plus;
+          BytecodeArray[BytecodeOffset] = &&op_plus_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_plus_rec;
         }
         break;
       case '-':
-        if (BytecodeArray[BytecodeOffset-1] == &&op_minus)
+        if (BytecodeArray[BytecodeOffset-1] == &&op_minus_prof)
           JumpMap[BytecodeOffset-1] += 1;
         else {
           JumpMap[BytecodeOffset] = 1;
-          BytecodeArray[BytecodeOffset++] = &&op_minus;
+          BytecodeArray[BytecodeOffset] = &&op_minus_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_minus_rec;
         }
         break;
       case '.':
-        BytecodeArray[BytecodeOffset++] = &&op_put;
+        BytecodeArray[BytecodeOffset] = &&op_put_prof;
+        AltBytecodeArray[BytecodeOffset++] = &&op_put_rec;
         break;
       case ',':
-        BytecodeArray[BytecodeOffset++] = &&op_get;
+        BytecodeArray[BytecodeOffset] = &&op_get_prof;
+        AltBytecodeArray[BytecodeOffset++] = &&op_get_rec;
         break;
       case '[':
         Stack.push_back(BytecodeOffset);
-        BytecodeArray[BytecodeOffset++] = &&op_if;
+        BytecodeArray[BytecodeOffset] = &&op_if_prof;
+        AltBytecodeArray[BytecodeOffset++] = &&op_if_rec;
         break;
       case ']':
         // Special case: [-] --> 0
@@ -103,7 +116,8 @@ int main(int argc, char **argv) {
             CodeBegin[i-2] == '[' && CodeBegin[i-1] == '-') {
           Stack.pop_back();
           BytecodeOffset -= 2;
-          BytecodeArray[BytecodeOffset++] = &&op_set_zero;
+          BytecodeArray[BytecodeOffset] = &&op_set_zero_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_set_zero_rec;
         // Special case: [->+<] --> a
         } else if (BytecodeOffset > 4 &&
                  CodeBegin[i-5] == '[' && CodeBegin[i-4] == '-' &&
@@ -115,12 +129,14 @@ int main(int argc, char **argv) {
           for (unsigned j = 1; j < 6; ++j)
             JumpMap[BytecodeOffset+j] = 0;
           Stack.pop_back();
-          BytecodeArray[BytecodeOffset++] = &&op_bin_add;
+          BytecodeArray[BytecodeOffset] = &&op_bin_add_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_bin_add_rec;
         } else {
           JumpMap[Stack.back()] = BytecodeOffset;
           JumpMap[BytecodeOffset] = Stack.back();
           Stack.pop_back();
-          BytecodeArray[BytecodeOffset++] = &&op_back;
+          BytecodeArray[BytecodeOffset] = &&op_back_prof;
+          AltBytecodeArray[BytecodeOffset++] = &&op_back_rec;
         }
         break;
       default:
@@ -131,7 +147,8 @@ int main(int argc, char **argv) {
   // Fill in the suffix of the preprocessed source for op_exit.
   // Thus, if we reach the end of the source, the program will terminate.
   while (BytecodeOffset < Code->getBufferSize()+1) {
-    BytecodeArray[BytecodeOffset++] = &&op_end;
+    BytecodeArray[BytecodeOffset] = &&op_end;
+    AltBytecodeArray[BytecodeOffset++] = &&op_end;
   }
   
   // Setup the array.
@@ -142,6 +159,8 @@ int main(int argc, char **argv) {
   // Note the lack of a explicit loop: every opcode is a tail-recursive
   // function that calls its own successor by indexing into BytecodeArray.
   uint8_t* data = BrainFArray;
+  
+  BrainFTraceRecorder Recorder;
   
   size_t pc = 0;
   goto *BytecodeArray[pc];
@@ -155,52 +174,115 @@ op_end:
 
   return 0;
 
-op_plus:
+op_plus_prof:
   *data += JumpMap[pc];
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_minus:
+op_minus_prof:
   *data -= JumpMap[pc];
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_left:
+op_left_prof:
   data -= JumpMap[pc];
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_right:
+op_right_prof:
   data += JumpMap[pc];
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_put:
+op_put_prof:
   putchar(*data);
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_get:
+op_get_prof:
   *data = getchar();
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_if:
+op_if_prof:
+  Recorder.profile(pc);
   if (!*data) pc = JumpMap[pc]+1;
   else pc += 1;
   goto *BytecodeArray[pc];
 
-op_back:
+op_back_prof:
+  Recorder.profile(pc);
   if (*data) pc = JumpMap[pc]+1;
   else pc += 1;
   goto *BytecodeArray[pc];
 
-op_set_zero:
+op_set_zero_prof:
   *data = 0;
   pc += 1;
   goto *BytecodeArray[pc];
 
-op_bin_add:
+op_bin_add_prof:
+  *(data + JumpMap[pc]) += *data;
+  *data = 0;
+  pc += 1;
+  goto *BytecodeArray[pc];
+  
+op_plus_rec:
+  Recorder.record(pc);
+  *data += JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_minus_rec:
+  Recorder.record(pc);
+  *data -= JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_left_rec:
+  Recorder.record(pc);
+  data -= JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_right_rec:
+  Recorder.record(pc);
+  data += JumpMap[pc];
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_put_rec:
+  Recorder.record(pc);
+  putchar(*data);
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_get_rec:
+  Recorder.record(pc);
+  *data = getchar();
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_if_rec:
+  Recorder.record(pc);
+  if (!*data) pc = JumpMap[pc]+1;
+  else pc += 1;
+  goto *BytecodeArray[pc];
+
+op_back_rec:
+  Recorder.record(pc);
+  if (*data) pc = JumpMap[pc]+1;
+  else pc += 1;
+  goto *BytecodeArray[pc];
+
+op_set_zero_rec:
+  Recorder.record(pc);
+  *data = 0;
+  pc += 1;
+  goto *BytecodeArray[pc];
+
+op_bin_add_rec:
+  Recorder.record(pc);
   *(data + JumpMap[pc]) += *data;
   *data = 0;
   pc += 1;

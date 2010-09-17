@@ -13,9 +13,15 @@
 #include "stdint.h"
 #include <cstring>
 
-/// BytecodeArray - An array of function pointers representing the
+/// BytecodeArray - An array of label pointers representing the
 /// source program.  Indexed by PC address.
 extern void **BytecodeArray;
+
+
+/// AltBytecodeArray - An array of label pointers representing the alternate
+/// version of the source program.  Initially, this is the recording version
+/// of the program.
+extern void **AltBytecodeArray;
 
 /// JumpMap - An array of on-the-side data used by the interpreter.
 /// Indexed by PC address.
